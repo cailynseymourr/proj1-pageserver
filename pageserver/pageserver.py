@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 
 import socket    # Basic TCP/IP communication on the internet
 import _thread   # Response computation runs concurrently with main program
+import os       # File and path manipulation
 
 
 def listen(portnum):
@@ -72,10 +73,10 @@ CAT = """
 # See:  https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 # or    http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
 ##
-STATUS_OK = "HTTP/1.0 200 OK\n\n"
-STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\n\n"
-STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\n\n"
-STATUS_NOT_IMPLEMENTED = "HTTP/1.0 401 Not Implemented\n\n"
+STATUS_OK = "HTTP/1.0 200 OK\r\n\r\n"
+STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\r\n\r\n"
+STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\r\n\r\n"
+STATUS_NOT_IMPLEMENTED = "HTTP/1.0 501 Not Implemented\r\n\r\n"
 
 
 def respond(sock):
@@ -90,14 +91,52 @@ def respond(sock):
     log.info("Request was {}\n***\n".format(request))
 
     parts = request.split()
-    if len(parts) > 1 and parts[0] == "GET":
-        transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
-    else:
-        log.info("Unhandled request: {}".format(request))
+    if len(parts) < 2 or parts[0] != "GET":
         transmit(STATUS_NOT_IMPLEMENTED, sock)
-        transmit("\nI don't handle this request: {}\n".format(request), sock)
+        transmit("I only handle GET requests\n", sock)
+        sock.close()
+        return
+    
+    path = parts[1]
 
+    if path.startswith("/~") or path.startswith("//") or ".." in path:
+        transmit(STATUS_FORBIDDEN, sock)
+        transmit("Forbidden path\n", sock)
+        sock.close()
+        return
+
+    if path.startswith("/"):
+        path = path[1:]  # Remove the leading slash
+
+    if "//" in path:
+        transmit(STATUS_FORBIDDEN, sock)
+        transmit("Forbidden path\n", sock)
+        sock.close()
+        return
+
+    if "/" in path:
+        transmit(STATUS_NOT_FOUND, sock)
+        transmit("File not found\n", sock)
+        sock.close()
+        return
+
+    if not (path.endswith(".html") or path.endswith(".css")):
+        transmit(STATUS_NOT_FOUND, sock)
+        transmit("Only .html and .css files are served\n", sock)
+        sock.close()
+        return
+
+    full_path = os.path.join(config.configuration().DOCROOT, path)
+
+    if not os.path.isfile(full_path):
+        transmit(STATUS_NOT_FOUND, sock)
+        transmit("File not found\n", sock)
+        sock.close()
+        return
+
+    transmit(STATUS_OK, sock)
+    with open(full_path, "r", encoding="utf-8") as f:
+        transmit(f.read(), sock)
     sock.shutdown(socket.SHUT_RDWR)
     sock.close()
     return
