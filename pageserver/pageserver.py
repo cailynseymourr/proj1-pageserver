@@ -86,7 +86,7 @@ def respond(sock):
     """
     sent = 0
     request = sock.recv(1024)  # We accept only short requests
-    request = str(request, encoding='utf-8', errors='strict')
+    request = request.decode(encoding='utf-8', errors='strict')
     log.info("--- Received request ----")
     log.info("Request was {}\n***\n".format(request))
 
@@ -97,36 +97,28 @@ def respond(sock):
         sock.close()
         return
     
-    path = parts[1]
+    raw_path = parts[1]
 
-    if path.startswith("/~") or path.startswith("//") or ".." in path:
+    if raw_path.startswith("/~") or "//" in raw_path or "/.." in raw_path:
         transmit(STATUS_FORBIDDEN, sock)
         transmit("Forbidden path\n", sock)
         sock.close()
         return
 
-    if path.startswith("/"):
-        path = path[1:]  # Remove the leading slash
+    if raw_path.startswith("/"):
+        raw_path = raw_path[1:]  # Remove the leading slash
+        print("RAW PATH:", repr(raw_path))
 
-    if "//" in path:
-        transmit(STATUS_FORBIDDEN, sock)
-        transmit("Forbidden path\n", sock)
-        sock.close()
-        return
+    norm = os.path.normpath(raw_path)
 
-    if "/" in path:
-        transmit(STATUS_NOT_FOUND, sock)
-        transmit("File not found\n", sock)
-        sock.close()
-        return
-
-    if not (path.endswith(".html") or path.endswith(".css")):
+    if not (norm.endswith(".html") or norm.endswith(".css")):
         transmit(STATUS_NOT_FOUND, sock)
         transmit("Only .html and .css files are served\n", sock)
         sock.close()
         return
 
-    full_path = os.path.join(config.configuration().DOCROOT, path)
+    full_path = os.path.join(config.configuration().DOCROOT, norm)
+    print("FULL PATH:", repr(full_path))
 
     if not os.path.isfile(full_path):
         transmit(STATUS_NOT_FOUND, sock)
