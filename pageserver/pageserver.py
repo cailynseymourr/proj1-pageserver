@@ -89,36 +89,38 @@ def respond(sock):
     request = request.decode(encoding='utf-8', errors='strict')
     log.info("--- Received request ----")
     log.info("Request was {}\n***\n".format(request))
-
+    
     parts = request.split()
     if len(parts) < 2 or parts[0] != "GET":
         transmit(STATUS_NOT_IMPLEMENTED, sock)
-        transmit("I only handle GET requests\n", sock)
-        sock.close()
-        return
-    
-    raw_path = parts[1]
-
-    if raw_path.startswith("/~") or "//" in raw_path or "/.." in raw_path:
-        transmit(STATUS_FORBIDDEN, sock)
-        transmit("Forbidden path\n", sock)
+        transmit("This server only implements GET requests.\n", sock)
         sock.close()
         return
 
-    if raw_path.startswith("/"):
-        raw_path = raw_path[1:]  # Remove the leading slash
-        print("RAW PATH:", repr(raw_path))
+    path = parts[1].split("?")[0]  # Ignore any query string
 
-    norm = os.path.normpath(raw_path)
+    for symbol in ("~", "//", ".."):
+        if symbol in path:
+            transmit(STATUS_FORBIDDEN, sock)
+            transmit("Forbidden path\n", sock)
+            sock.close()
+            return
 
-    if not (norm.endswith(".html") or norm.endswith(".css")):
+    rel_path = path.lstrip("/")
+    served = False
+    for ext in (".html", ".css"):
+        if rel_path.endswith(ext):
+            served = True
+            break
+
+    if not served:
         transmit(STATUS_NOT_FOUND, sock)
-        transmit("Only .html and .css files are served\n", sock)
+        transmit("Only .html and .css files are served.\n", sock)
         sock.close()
         return
 
-    full_path = os.path.join(config.configuration().DOCROOT, norm)
-    print("FULL PATH:", repr(full_path))
+    full_path = os.path.join(config.configuration().DOCROOT, rel_path)
+    log.debug("Full path is {}".format(full_path))
 
     if not os.path.isfile(full_path):
         transmit(STATUS_NOT_FOUND, sock)
@@ -126,12 +128,18 @@ def respond(sock):
         sock.close()
         return
 
-    transmit(STATUS_OK, sock)
-    with open(full_path, "r", encoding="utf-8") as f:
-        transmit(f.read(), sock)
-    sock.shutdown(socket.SHUT_RDWR)
-    sock.close()
-    return
+    try:
+        sock.sendall(STATUS_OK.encode("utf-8"))
+        with open(full_path, "rb") as f:
+            while True:
+                chunk = f.read(4096)
+                if not chunk:
+                    break
+                sock.sendall(chunk)
+    except OSError as err:
+        log.warning("Error serving {}: {}".format(full_path, err))
+    finally:
+        sock.close()
 
 
 def transmit(msg, sock):
